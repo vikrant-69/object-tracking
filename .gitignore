@@ -1,0 +1,7 @@
+data/
+lightning_logs/
+src/*/__pycache__
+test_out/
+venv/
+weights/
+*.npy
