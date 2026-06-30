@@ -1,0 +1,150 @@
+# ============================================================================
+# Siamese Object Tracker v2 — Default Configuration
+# ============================================================================
+# Architecture: MobileViT-XS + Linear Attention Fusion + Temporal Memory (SSM)
+# Usage:  python train.py --config config.yaml
+#         Any CLI argument will override the corresponding YAML value.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Model Architecture
+# ---------------------------------------------------------------------------
+model:
+  backbone:
+    stem_channels: 48
+    stages:                          # [out_ch, stride, expand_ratio, num_blocks]
+      - [48,  1, 1, 1]              # stage1
+      - [64,  2, 4, 2]              # stage2
+      - [96,  2, 4, 3]              # stage3
+      - [128, 1, 4, 1]              # stage4
+      - [192, 1, 4, 1]              # stage5
+    transformer:
+      depth: 2
+      heads_stage4: 4
+      heads_stage5: 4
+      mlp_ratio: 4.0
+      dropout: 0.1
+
+  temporal_memory:
+    cache_size: 4
+    state_dim: 32
+
+  head:
+    hidden_channels: 192
+    num_cls_convs: 2
+    num_reg_convs: 2
+
+  fusion:
+    feature_map: "elu1"              # phi(x) = ELU(x) + 1
+
+# ---------------------------------------------------------------------------
+# Data Pipeline
+# ---------------------------------------------------------------------------
+data:
+  data_dir: "data"
+  val_data_dir: "data/val"
+  train_seqs: ["Bolt", "Football"]
+  val_seqs: ["Car1"]
+  template_size: 127
+  search_size: 255
+  seq_len: 4                         # number of template frames per sample (= cache_size)
+  max_search_gap: 50                 # max frame gap between last template and search
+  max_frame_gap: 100                 # max gap between first and last template
+  batch_size: 8
+  num_workers: 0                     # 0 for Windows stability; increase on Linux
+
+# ---------------------------------------------------------------------------
+# Augmentation
+# ---------------------------------------------------------------------------
+augmentation:
+  color_jitter:
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+    probability: 0.5
+  gaussian_blur:
+    blur_limit: [3, 5]
+    probability: 0.3
+  scale_jitter: 0.1                  # ±10% scale perturbation
+  shift_jitter: 16                   # ±16px center shift
+
+# ---------------------------------------------------------------------------
+# Loss Functions
+# ---------------------------------------------------------------------------
+loss:
+  focal:
+    alpha: 0.25
+    gamma: 2.0
+  giou:
+    weight: 1.0                      # lambda_reg
+  distillation:
+    weight: 1.0                      # beta_kd
+    scales: ["scale1", "scale2", "scale3"]  # multi-scale taps
+  pos_region_scale: 0.6              # center sub-box scale for positive labels
+
+# ---------------------------------------------------------------------------
+# Teacher Model (Knowledge Distillation)
+# ---------------------------------------------------------------------------
+teacher:
+  weights_dir: "weights"
+  weights_filename: "sot_resnet50.model"
+  pretrained: true
+  # Multi-scale feature channels from ResNet-50
+  layer_channels: [512, 1024, 2048]  # layer2, layer3, layer4
+
+# ---------------------------------------------------------------------------
+# Optimizer & Scheduler
+# ---------------------------------------------------------------------------
+optimizer:
+  name: "adamw"
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  betas: [0.9, 0.999]
+
+scheduler:
+  name: "cosine"
+  eta_min: 1.0e-6
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+training:
+  max_epochs: 50
+  precision: "16-mixed"              # "32", "16-mixed", "bf16-mixed"
+  accelerator: "auto"                # "auto", "gpu", "cpu"
+  devices: 1
+  log_every_n_steps: 5
+  val_check_interval: 1.0
+  limit_train_batches: 1.0           # set to int (e.g. 10) for debugging
+  limit_val_batches: 1.0
+  gradient_clip_val: 1.0
+
+# ---------------------------------------------------------------------------
+# Quantization-Aware Training
+# ---------------------------------------------------------------------------
+qat:
+  enabled: false
+  qconfig_backend: "fbgemm"          # "fbgemm" (x86) or "qnnpack" (ARM)
+
+# ---------------------------------------------------------------------------
+# Pruning
+# ---------------------------------------------------------------------------
+pruning:
+  enabled: true
+  amount: 0.3
+
+# ---------------------------------------------------------------------------
+# Logging & Checkpoints
+# ---------------------------------------------------------------------------
+logging:
+  tensorboard_dir: "lightning_logs"
+  log_images_every_n_steps: 1        # log images at every step
+  num_vis_samples: 3                 # number of samples to visualize
+
+checkpoint:
+  dirpath: "weights"
+  filename: "best_siam_tracker_v2"
+  monitor: "val_loss"
+  mode: "min"
+  save_top_k: 1
